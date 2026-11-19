@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Api.Services;
 
 public record LeaveBalance(int EmployeeId, decimal Entitlement, decimal Used, decimal Pending, decimal Available);
+public record LeaveSummary(int EmployeeId, decimal DaysTakenThisYear);
 public record CreateLeave(int EmployeeId, DateOnly StartDate, DateOnly EndDate, HalfDay HalfDay = HalfDay.None, string Reason = "");
 
 public class LeaveException(string message) : Exception(message);
@@ -27,12 +28,19 @@ public class LeaveService(AcmeDb db)
         return new LeaveBalance(employeeId, emp.AnnualEntitlement, used, pending, emp.AnnualEntitlement - used - pending);
     }
 
-    /// <summary>Days taken this year, for the employee summary card.</summary>
+    /// <summary>Days taken this year, for the employee summary card. Only Approved leave is taken. Null if the employee does not exist.</summary>
+    public async Task<LeaveSummary?> GetSummaryAsync(int employeeId)
+    {
+        if (await db.Employees.FindAsync(employeeId) is null) return null;
+        return new LeaveSummary(employeeId, await DaysTakenThisYearAsync(employeeId));
+    }
+
+    /// <summary>Working days of Approved leave starting this year (Pending and Rejected are not taken).</summary>
     public async Task<decimal> DaysTakenThisYearAsync(int employeeId)
     {
         var year = DateTime.UtcNow.Year;
         var requests = await db.LeaveRequests
-            .Where(r => r.EmployeeId == employeeId && r.StartDate.Year == year)
+            .Where(r => r.EmployeeId == employeeId && r.Status == LeaveStatus.Approved && r.StartDate.Year == year)
             .ToListAsync();
         return requests.Sum(DaysOf);
     }
